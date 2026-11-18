@@ -316,16 +316,18 @@ it.skipIf(process.platform === "win32")(
     const source = createSource();
     // Like Feishu's fs-safe binaries: the addon lives in a dependency package, so native
     // admission takes that package and the plugin's own files stay in the reused tree.
-    const addon = path.join(source, "node_modules", "dep", "addon.node");
-    fs.writeFileSync(addon, "native fixture");
+    const dep = fs.realpathSync(path.join(source, "node_modules", "dep"));
+    fs.writeFileSync(path.join(dep, "addon.node"), "native fixture");
+    const addon = (artifact: Artifact) => path.join(artifact.sourceAliases[dep]!, "addon.node");
+    const index = (artifact: Artifact) => fs.statSync(artifact.resolve(path.join(source, "index.cjs")));
     const caches = [createPluginCache(), createPluginCache()];
     try {
       later();
       const first = withPluginCache(caches[0]!, () => capture(source));
       expect(first.boundaryRoot.startsWith(reuseRoot() + path.sep)).toBe(true);
-      expect(fs.readFileSync(first.resolve(addon), "utf8")).toBe("native fixture");
+      expect(fs.readFileSync(addon(first), "utf8")).toBe("native fixture");
       expect(recordsNative(first)).toBe(false);
-      const index = fs.statSync(path.join(first.boundaryRoot, "index.cjs")).ino;
+      const indexIno = index(first).ino;
       const digest = first.sourceDigest;
       restart(first);
       const work = countWork();
@@ -333,12 +335,12 @@ it.skipIf(process.platform === "win32")(
       const second = withPluginCache(caches[1]!, () => capture(source));
       expect(second.boundaryRoot).toBe(first.boundaryRoot);
       expect(second.sourceDigest).toBe(digest);
-      expect(fs.statSync(path.join(second.boundaryRoot, "index.cjs")).ino).toBe(index);
+      expect(index(second).ino).toBe(indexIno);
       const contentCopies = work.copies.mock.calls.filter(([, , target]) =>
         String(target).startsWith(second.boundaryRoot + path.sep),
       );
       expect(contentCopies).toEqual([]);
-      expect(fs.readFileSync(second.resolve(addon), "utf8")).toBe("native fixture");
+      expect(fs.readFileSync(addon(second), "utf8")).toBe("native fixture");
       expect(recordsNative(second)).toBe(false);
       restart(second);
     } finally {
