@@ -2,3 +2,4 @@
 src/commands/startup-config-preflight.availability.test.ts
 src/gateway/server-startup-post-attach.test.ts
 src/plugins/plugin-generation-artifact.test.ts
+src/state/openclaw-agent-execution.idle-capacity.test.ts

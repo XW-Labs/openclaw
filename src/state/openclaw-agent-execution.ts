@@ -61,10 +61,30 @@ const log = createSubsystemLogger("state/agent-db");
 // References are derived; the canonical agent and shared resource owners govern retirement.
 const executionState = resolveGlobalSingleton<{
   owners: Map<string, ExecutionOwner | IncognitoAgentExecutionOwner>;
-  // The slot stays occupied during eviction and after failed cleanup.
-  idle?: ExecutionOwner;
+  // Idle owners in age order. A slot stays occupied during eviction and after failed cleanup.
+  idleOwners?: Set<ExecutionOwner>;
 }>(Symbol.for("openclaw.agentDatabaseExecutionOwners"), () => ({ owners: new Map() }));
 const executions = executionState.owners;
+const idleOwners = (executionState.idleOwners ??= new Set());
+const MAX_IDLE_EXECUTIONS = 16;
+
+/** Idle agent databases kept open; gateways serving several agents raise it to avoid reopening. */
+export function resolveIdleAgentExecutionCapacity(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.OPENCLAW_AGENT_DB_IDLE_EXECUTIONS);
+  return Number.isInteger(parsed) && parsed >= 1 ? Math.min(parsed, MAX_IDLE_EXECUTIONS) : 1;
+}
+
+function oldestIdleToEvict(except: ExecutionOwner): ExecutionOwner | undefined {
+  if (idleOwners.size < resolveIdleAgentExecutionCapacity()) {
+    return undefined;
+  }
+  for (const owner of idleOwners) {
+    if (owner !== except) {
+      return owner;
+    }
+  }
+  return undefined;
+}
 const runInExecutionOwnerContext = AsyncLocalStorage.snapshot();
 
 /** File captures stay synchronous; explicit ephemeral targets await their pinned actor. */
@@ -232,9 +252,7 @@ function createAgentDatabaseExecution(
         if (generation === captured) {
           generation = undefined;
           cleanupFailure = undefined;
-          if (executionState.idle === owner) {
-            executionState.idle = undefined;
-          }
+          idleOwners.delete(owner);
         }
       },
       (error: unknown) => {
@@ -288,7 +306,7 @@ function createAgentDatabaseExecution(
       signal?.throwIfAborted();
     }
     if (!generation) {
-      for (let idle = executionState.idle; idle && idle !== owner; idle = executionState.idle) {
+      for (let idle = oldestIdleToEvict(owner); idle; idle = oldestIdleToEvict(owner)) {
         await idle.closeIdle();
         assertCurrent();
         source.assertCurrent();
@@ -461,8 +479,8 @@ function createAgentDatabaseExecution(
       observeOpenClawDatabaseMaintenanceResource(aliases.get(pathname));
       borrowers += 1;
       clearIdleTimer();
-      if (executionState.idle === owner && !nativeClosing && !cleanupFailure) {
-        executionState.idle = undefined;
+      if (!nativeClosing && !cleanupFailure) {
+        idleOwners.delete(owner);
       }
       if (creatingTarget) {
         creationIdentity ??= creatingTarget;
@@ -604,11 +622,16 @@ function createAgentDatabaseExecution(
               return;
             }
             const drainSignal = getGatewayRestartDrainSignal();
-            if (generation && !nativeClosing && !executionState.idle && !drainSignal.aborted) {
-              executionState.idle = owner;
+            if (
+              generation &&
+              !nativeClosing &&
+              idleOwners.size < resolveIdleAgentExecutionCapacity() &&
+              !drainSignal.aborted
+            ) {
+              idleOwners.add(owner);
               const timer = runInExecutionOwnerContext(() =>
                 setTimeout(() => {
-                  if (idleTimer !== timer || executionState.idle !== owner) {
+                  if (idleTimer !== timer || !idleOwners.has(owner)) {
                     return;
                   }
                   void owner.closeIdle().catch(reportCleanupFailure);
