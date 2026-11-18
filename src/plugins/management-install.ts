@@ -209,6 +209,34 @@ async function resolveOfficialManagedInstallSpec(params: {
   return specs.installSpec === request.spec ? null : specs.installSpec;
 }
 
+type NpmPackInstallSuccess = Extract<
+  Awaited<ReturnType<typeof installPluginFromNpmPackArchive>>,
+  { ok: true }
+>;
+
+/** Map a verified npm-pack install onto the durable record every npm-pack path persists. */
+export function buildNpmPackInstallRecord(
+  result: Pick<
+    NpmPackInstallSuccess,
+    "pluginId" | "targetDir" | "manifestName" | "version" | "npmResolution" | "npmTarballName"
+  >,
+  archivePath: string,
+): PluginInstallRecord {
+  return {
+    source: "npm",
+    spec: result.npmResolution?.resolvedSpec ?? result.manifestName ?? result.pluginId,
+    sourcePath: archivePath,
+    installPath: result.targetDir,
+    ...(result.version ? { version: result.version } : {}),
+    ...buildNpmResolutionFields(result.npmResolution),
+    artifactKind: "npm-pack",
+    artifactFormat: "tgz",
+    ...(result.npmResolution?.integrity ? { npmIntegrity: result.npmResolution.integrity } : {}),
+    ...(result.npmResolution?.shasum ? { npmShasum: result.npmResolution.shasum } : {}),
+    ...(result.npmTarballName ? { npmTarballName: result.npmTarballName } : {}),
+  };
+}
+
 type ManagedPluginSourceInstallParams = {
   request: ManagedPluginSourceInstallRequest;
   snapshot: ConfigSnapshotForInstallPersist;
@@ -517,21 +545,7 @@ async function installResolvedManagedPluginSource(
         mode: request.mode,
       }),
       {
-        install: (result) => ({
-          source: "npm",
-          spec: result.npmResolution?.resolvedSpec ?? result.manifestName ?? result.pluginId,
-          sourcePath: request.archivePath,
-          installPath: result.targetDir,
-          ...(result.version ? { version: result.version } : {}),
-          ...buildNpmResolutionFields(result.npmResolution),
-          artifactKind: "npm-pack",
-          artifactFormat: "tgz",
-          ...(result.npmResolution?.integrity
-            ? { npmIntegrity: result.npmResolution.integrity }
-            : {}),
-          ...(result.npmResolution?.shasum ? { npmShasum: result.npmResolution.shasum } : {}),
-          ...(result.npmTarballName ? { npmTarballName: result.npmTarballName } : {}),
-        }),
+        install: (result) => buildNpmPackInstallRecord(result, request.archivePath),
       },
     );
   }

@@ -5,6 +5,7 @@ import { theme } from "../../packages/terminal-core/src/theme.js";
 import { createLazyRuntimeMethodBinder, createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import type { PluginInspectOptions } from "./plugins-inspect-command.js";
 import type { PluginsListOptions } from "./plugins-list-command.js";
+import type { PluginsActivatePreparedOptions } from "./plugins-prepared-install-command.js";
 import type { PluginsReloadOptions } from "./plugins-reload-command.js";
 import type { PluginsSearchOptions } from "./plugins-search-command.js";
 import type { PluginUninstallOptions } from "./plugins-uninstall-command.js";
@@ -157,6 +158,11 @@ export function registerPluginsCli(program: Command) {
     .option("--no-enable", "Preserve existing plugin enablement, allowlists, and denylists")
     .option("--accept-capabilities", "Accept the plugin's declared capabilities", false)
     .option(
+      "--prepare-only",
+      "Stage an npm-pack: install without activating it; finish with plugins activate-prepared",
+      false,
+    )
+    .option(
       "--dangerously-force-unsafe-install",
       "Deprecated no-op; security.installPolicy may still block",
       false,
@@ -171,6 +177,18 @@ export function registerPluginsCli(program: Command) {
       "Install a Claude marketplace plugin from a local repo/path or git/GitHub source",
     )
     .action(pluginAction((runtime) => runtime.runPluginsInstallAction));
+
+  plugins
+    .command("activate-prepared")
+    .description("Activate an install staged with plugins install --prepare-only (Gateway stopped)")
+    .argument("<id>", "Plugin id")
+    .option("--accept-capabilities", "Accept widened plugin capabilities", false)
+    .option("--json", "Print the activated install as JSON", false)
+    .action(async (id: string, opts: PluginsActivatePreparedOptions) => {
+      const { runPluginsActivatePreparedCommand } =
+        await import("./plugins-prepared-install-command.js");
+      await runPluginsActivatePreparedCommand(id, opts);
+    });
 
   plugins
     .command("update")

@@ -25,6 +25,8 @@ export type RunPluginInstallCommandParams = {
     link?: boolean;
     pin?: boolean;
     marketplace?: string;
+    /** Stage an npm-pack generation without recording or activating it. */
+    prepareOnly?: boolean;
   };
   invalidateRuntimeCache?: boolean;
   runtime?: RuntimeEnv;

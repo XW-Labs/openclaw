@@ -34,6 +34,13 @@ export async function runPluginInstallCommand(params: RunPluginInstallCommandPar
     return runtime.exit(1);
   }
   const { raw, opts, sourcePlan } = preflight;
+  const prepareRequest = sourcePlan?.request.source === "npm-pack" ? sourcePlan.request : null;
+  if (opts.prepareOnly && !prepareRequest) {
+    runtime.error(
+      "--prepare-only requires an npm-pack:<archive.tgz> source. Install other sources without --prepare-only.",
+    );
+    return runtime.exit(1);
+  }
   if (opts.dangerouslyForceUnsafeInstall) {
     runtime.log(theme.warn(DEPRECATED_DANGEROUS_FORCE_UNSAFE_INSTALL_WARNING));
   }
@@ -51,6 +58,19 @@ export async function runPluginInstallCommand(params: RunPluginInstallCommandPar
     }))
   ) {
     return runtime.exit(1);
+  }
+  if (opts.prepareOnly && prepareRequest) {
+    // Preparing only writes an unrecorded generation, so a running Gateway keeps
+    // serving the current one; never hand this off to it.
+    const { runPreparedPluginInstallCommand } =
+      await import("./plugins-prepared-install-command.js");
+    return await runPreparedPluginInstallCommand({
+      archivePath: prepareRequest.archivePath,
+      mode: preflight.installMode,
+      opts,
+      allowInstallPolicyWarningPrompt: params.allowInstallPolicyWarningPrompt,
+      runtime,
+    });
   }
   let result: Awaited<ReturnType<typeof installPluginWithHookFallback>>;
   try {
