@@ -1,0 +1,4 @@
+# Upstream test files covering the XW patches on this branch; run by xw-build.yml.
+src/commands/startup-config-preflight.availability.test.ts
+src/gateway/server-startup-post-attach.test.ts
+src/plugins/plugin-generation-artifact.test.ts
