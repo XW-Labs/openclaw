@@ -329,9 +329,6 @@ export function acquirePluginCaptureReuse(params: { rootDir: string; executes: b
     active: true,
     /** Sources whose recorded content hash this adoption accepted by identity. */
     adopted,
-    miss(detail: string): never {
-      throw new PluginCaptureReuseMiss(detail);
-    },
     file(real: string, identity: string, target: string) {
       const input = sourceInput(manifest, real);
       const entry = capturedEntry(manifest, path.relative(content, target));
@@ -388,10 +385,16 @@ export function acquirePluginCaptureReuse(params: { rootDir: string; executes: b
       receipt: { signature: string; sourceDigest: string };
       sources: ReadonlyMap<string, PluginSourceInput>;
       contentHashes: ReadonlyMap<string, string>;
+      /** References into native admission custody: recreated by native admission every start. */
+      nativeTargets: ReadonlySet<string>;
     }) {
       const captured: Record<string, CapturedEntry> = {};
       let complete = true;
       walkTree(content, (relative, absolute, stat) => {
+        if (params.nativeTargets.has(absolute)) {
+          // Unrecorded, so the next adoption removes it before native admission links it again.
+          return false;
+        }
         if (stat.isDirectory()) {
           captured[relative] = { kind: "directory" };
         } else if (stat.isSymbolicLink()) {
@@ -407,7 +410,7 @@ export function acquirePluginCaptureReuse(params: { rootDir: string; executes: b
         }
         return true;
       });
-      if (!complete || [...params.sources.values()].some((input) => input.native)) {
+      if (!complete) {
         return;
       }
       const stat = fs.lstatSync(content, { bigint: true });

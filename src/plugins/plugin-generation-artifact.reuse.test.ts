@@ -3,7 +3,15 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { acquireSqliteStagingToken } from "../infra/sqlite-staging-token.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createPluginCache, retirePluginCache, withPluginCache } from "./plugin-cache.js";
+import { writePersistedInstalledPluginIndex } from "./installed-plugin-index-store-write.js";
+import { readPersistedInstalledPluginIndex } from "./installed-plugin-index-store.js";
+import { createFixture } from "./plugin-generation-artifact.admission.test-support.js";
+import {
+  preparePluginNativeAdmissions,
+  settlePluginNativeAdmissions,
+} from "./plugin-native-admission-state.js";
 import { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js";
 import { prunePluginNativeCaptureDirectories } from "./plugin-source-capture-directory.js";
 import { sweepPluginSourceCapturesForTest } from "./plugin-source-capture-directory.test-support.js";
@@ -297,8 +305,13 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
+const recordsNative = (artifact: Artifact) =>
+  Object.keys(JSON.parse(fs.readFileSync(manifestOf(artifact), "utf8")).captured).some((entry) =>
+    entry.endsWith("addon.node"),
+  );
+
 it.skipIf(process.platform === "win32")(
-  "never adopts a capture with native artifacts",
+  "adopts the ordinary files around native artifacts and admits the native bytes again",
   async () => {
     const source = createSource();
     fs.writeFileSync(path.join(source, "addon.node"), "native fixture");
@@ -307,18 +320,114 @@ it.skipIf(process.platform === "win32")(
       later();
       const first = withPluginCache(caches[0]!, () => capture(source));
       expect(first.boundaryRoot.startsWith(reuseRoot() + path.sep)).toBe(true);
-      expect(fs.existsSync(manifestOf(first))).toBe(false);
+      const addon = path.join(source, "addon.node");
+      expect(fs.readFileSync(first.resolve(addon), "utf8")).toBe("native fixture");
+      expect(recordsNative(first)).toBe(false);
+      const index = fs.statSync(path.join(first.boundaryRoot, "index.cjs")).ino;
+      const digest = first.sourceDigest;
       restart(first);
       const work = countWork();
+      // A later process has its own native admission state and admits the addon again.
       const second = withPluginCache(caches[1]!, () => capture(source));
-      expect(work.copies).toHaveBeenCalled();
-      expect(fs.existsSync(manifestOf(second))).toBe(false);
+      expect(second.boundaryRoot).toBe(first.boundaryRoot);
+      expect(second.sourceDigest).toBe(digest);
+      expect(fs.statSync(path.join(second.boundaryRoot, "index.cjs")).ino).toBe(index);
+      const contentCopies = work.copies.mock.calls.filter(([, , target]) =>
+        String(target).startsWith(second.boundaryRoot + path.sep),
+      );
+      expect(contentCopies).toEqual([]);
+      expect(fs.readFileSync(second.resolve(addon), "utf8")).toBe("native fixture");
+      expect(recordsNative(second)).toBe(false);
       restart(second);
     } finally {
       for (const cache of caches) {
         await retirePluginCache(cache);
       }
     }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "recaptures when a native artifact changed between starts",
+  async () => {
+    const source = createSource();
+    fs.writeFileSync(path.join(source, "addon.node"), "native fixture");
+    const caches = [createPluginCache(), createPluginCache()];
+    try {
+      later();
+      const first = withPluginCache(caches[0]!, () => capture(source));
+      const content = fs.statSync(first.boundaryRoot).ino;
+      const digest = first.sourceDigest;
+      restart(first);
+      fs.writeFileSync(path.join(source, "addon.node"), "native fixture, rebuilt");
+      later();
+      const second = withPluginCache(caches[1]!, () => capture(source));
+      expect(second.boundaryRoot).toBe(first.boundaryRoot);
+      // The adoption's receipt did not hit, so the content directory was recycled.
+      expect(fs.statSync(second.boundaryRoot).ino).not.toBe(content);
+      expect(second.sourceDigest).not.toBe(digest);
+      expect(fs.readFileSync(second.resolve(path.join(source, "addon.node")), "utf8")).toBe(
+        "native fixture, rebuilt",
+      );
+      expect(fs.existsSync(manifestOf(second))).toBe(true);
+      restart(second);
+    } finally {
+      for (const cache of caches) {
+        await retirePluginCache(cache);
+      }
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "adopts a managed native plugin whose admission the installed index carries to the next start",
+  async () => {
+    await withOpenClawTestState({ label: "native-capture-reuse" }, async (state) => {
+      vi.stubEnv("OPENCLAW_PLUGIN_CAPTURE_REUSE", "1");
+      const fixture = createFixture(state.path("installed"), true);
+      await writePersistedInstalledPluginIndex(fixture.index, { stateDir: state.stateDir });
+      later();
+      const first = createPluginCache();
+      let boundaryRoot: string;
+      let digest: string;
+      try {
+        preparePluginNativeAdmissions(fixture.index, first);
+        const artifact = withPluginCache(first, () => capture(fixture.root));
+        boundaryRoot = artifact.boundaryRoot;
+        digest = artifact.sourceDigest;
+        expect(boundaryRoot.split(path.sep)).toContain("reuse");
+        expect(fs.existsSync(manifestOf(artifact))).toBe(true);
+        await settlePluginNativeAdmissions(first);
+        restart(artifact);
+      } finally {
+        await retirePluginCache(first);
+      }
+      await using reader = createPluginCache();
+      const persisted = await withPluginCache(reader, () =>
+        readPersistedInstalledPluginIndex({ stateDir: state.stateDir }),
+      );
+      expect(Object.keys(persisted!.plugins[0]!.sourceAdmissions ?? {})).toHaveLength(1);
+      const second = createPluginCache();
+      try {
+        // The next start seeds the published native receipt, as the Gateway does from its index.
+        preparePluginNativeAdmissions(persisted!, second);
+        const work = countWork();
+        const artifact = withPluginCache(second, () => capture(fixture.root));
+        expect(artifact.boundaryRoot).toBe(boundaryRoot);
+        expect(artifact.sourceDigest).toBe(digest);
+        expect(
+          work.copies.mock.calls.filter(([, , target]) =>
+            String(target).startsWith(boundaryRoot + path.sep),
+          ),
+        ).toEqual([]);
+        expect(fs.readFileSync(artifact.resolve(fixture.filename)).equals(fixture.bytes)).toBe(
+          true,
+        );
+        restart(artifact);
+      } finally {
+        await retirePluginCache(second);
+      }
+    });
   },
 );
 

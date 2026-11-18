@@ -60,6 +60,7 @@ export function createPluginGenerationFileCapture({
   onPackageMetadata,
   adoption,
   contentHashes,
+  nativeTargets,
 }: {
   boundary: string;
   destination: string;
@@ -81,6 +82,8 @@ export function createPluginGenerationFileCapture({
   adoption?: PluginCaptureAdoption;
   /** Verified content of each copied destination, for a reusable capture's manifest. */
   contentHashes?: Map<string, string>;
+  /** Destinations that reference native admission custody; a reusable capture never records them. */
+  nativeTargets?: Set<string>;
 }) {
   const { inputs, pendingInputs, additions } = sourceCapture;
   const ancestors = new Set<string>();
@@ -174,18 +177,15 @@ export function createPluginGenerationFileCapture({
       // rejected by the acquisition owner even when the first attempt is incomplete.
       additions.add(target);
       let copiedContent: ReturnType<typeof copyPluginSourceFile>;
-      const native = adopting
-        ? undefined
-        : nativeAdmission.materialize(real, inputBoundary, target, stat, source);
-      if (adopting) {
-        // Native admission owns separate custody; reusable captures never hold native bytes.
-        if (nativeAdmission.isNativeInput(real, inputBoundary, stat, source)) {
-          adoption!.miss(`native input ${source}`);
-        }
+      // Native admission owns separate custody and admits native bytes on every start, adopted
+      // or not: a reusable capture records only the ordinary files around its references.
+      const native = nativeAdmission.materialize(real, inputBoundary, target, stat, source);
+      if (native) {
+        nativeTargets?.add(target);
+        nativeAdmission.reconcileSourceInputs(inputs);
+      } else if (adopting) {
         const identity = pluginSourceInputIdentity(stat);
         copiedContent = { ...adoption!.file(real, identity, target), sourceIdentity: identity };
-      } else if (native) {
-        nativeAdmission.reconcileSourceInputs(inputs);
       } else if (captured) {
         // A second filename for a prefetched entry retains its first bytes and source identity.
         copiedContent = copyPluginSourceFile(captured, directory, target, {
@@ -212,7 +212,7 @@ export function createPluginGenerationFileCapture({
         boundary: native?.boundary ?? directory,
         sizeBytes: Number(stat.size),
         native: native !== undefined,
-        adopted: adopting,
+        adopted: adopting && !native,
         prepared: native?.content ?? copiedContent,
         onContent: (content) => {
           native?.record(content);

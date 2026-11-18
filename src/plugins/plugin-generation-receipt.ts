@@ -85,11 +85,18 @@ export function createPluginGenerationReceipt(prepared?: PluginGenerationReceipt
       if (finished) {
         return finished;
       }
+      const adopted = events.some((event) => typeof event !== "string" && event.adopted);
+      if (adopted) {
+        // Adopted bytes are proven by the prepared signature, so it must cover every file:
+        // hash native bytes from their admitted custody before comparing it.
+        for (const event of events) {
+          if (typeof event !== "string" && event.native && !event.content) {
+            readContent(event);
+          }
+        }
+      }
       const signature = inputSignature();
-      if (
-        events.some((event) => typeof event !== "string" && event.adopted) &&
-        (signature === undefined || prepared?.signature !== signature)
-      ) {
+      if (adopted && (signature === undefined || prepared?.signature !== signature)) {
         throw new Error("Plugin capture reuse changed its source receipt");
       }
       const receipt =

@@ -16,7 +16,6 @@ import {
 } from "./plugin-generation-source-lookup.js";
 import {
   createPluginNativeAdmission,
-  hasPreparedPluginNativeAdmission,
   type PluginNativeRecovery,
 } from "./plugin-native-admission.js";
 import { createPluginNativeImportPattern } from "./plugin-native-resolution.js";
@@ -90,8 +89,7 @@ export function capturePluginGenerationArtifact(
     !entryFile &&
     !nativeRecovery &&
     dependencyLookupBoundary === undefined &&
-    !hasPluginSourceCaptureDirectoryOverride() &&
-    !hasPreparedPluginNativeAdmission(rootDir)
+    !hasPluginSourceCaptureDirectoryOverride()
       ? acquirePluginCaptureReuse({ rootDir, executes: Boolean(execute) })
       : undefined;
   if (!lease) {
@@ -166,6 +164,7 @@ function captureArtifact(
     nativeAdmission.prepared ?? adoption?.manifest.receipt,
   );
   const contentHashes = reuse && !adoption ? new Map<string, string>() : undefined;
+  const nativeTargets = reuse ? new Set<string>() : undefined;
   const adoptedLinks = new Set<string>();
   const {
     inputs,
@@ -273,6 +272,7 @@ function captureArtifact(
       receipt,
       adoption,
       contentHashes,
+      nativeTargets,
       onPackageMetadata(source, target) {
         metadataCapture.record(target, (manifest) => {
           for (const alias of importTargetNames(manifest.imports)) {
@@ -736,6 +736,7 @@ function captureArtifact(
           receipt: initialReceipt,
           sources: inputs,
           contentHashes: contentHashes!,
+          nativeTargets: nativeTargets!,
         });
       } catch (error) {
         // Without a manifest the next start recaptures; this capture stays valid.
