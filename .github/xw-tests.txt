@@ -3,3 +3,9 @@ src/commands/startup-config-preflight.availability.test.ts
 src/gateway/server-startup-post-attach.test.ts
 src/plugins/plugin-generation-artifact.test.ts
 src/state/openclaw-agent-execution.idle-capacity.test.ts
+extensions/feishu/src/sequential-key.test.ts
+extensions/feishu/src/monitor.message-handler.topic-lanes.test.ts
+extensions/feishu/src/monitor.message-handler.ingress.test.ts
+extensions/feishu/src/bot.bot-threads.test.ts
+extensions/feishu/src/bot.test.ts
+extensions/feishu/src/session-route.test.ts
