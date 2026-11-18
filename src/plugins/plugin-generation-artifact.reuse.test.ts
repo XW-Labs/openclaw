@@ -314,13 +314,15 @@ it.skipIf(process.platform === "win32")(
   "adopts the ordinary files around native artifacts and admits the native bytes again",
   async () => {
     const source = createSource();
-    fs.writeFileSync(path.join(source, "addon.node"), "native fixture");
+    // Like Feishu's fs-safe binaries: the addon lives in a dependency package, so native
+    // admission takes that package and the plugin's own files stay in the reused tree.
+    const addon = path.join(source, "node_modules", "dep", "addon.node");
+    fs.writeFileSync(addon, "native fixture");
     const caches = [createPluginCache(), createPluginCache()];
     try {
       later();
       const first = withPluginCache(caches[0]!, () => capture(source));
       expect(first.boundaryRoot.startsWith(reuseRoot() + path.sep)).toBe(true);
-      const addon = path.join(source, "addon.node");
       expect(fs.readFileSync(first.resolve(addon), "utf8")).toBe("native fixture");
       expect(recordsNative(first)).toBe(false);
       const index = fs.statSync(path.join(first.boundaryRoot, "index.cjs")).ino;
