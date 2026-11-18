@@ -1,7 +1,8 @@
 # XW-Labs fork only: on every push to a patch branch (xw/<upstream tag>) or a
 # release tag (xw-v<upstream version>-<n>), run the targeted upstream tests
-# listed in .github/xw-tests.txt and build an installable package tarball.
-# Tags also attach the tarball to a GitHub release. Upstream workflows only
+# listed in .github/xw-tests.txt and build an installable package tarball, plus
+# the Feishu plugin npm-pack tarball (`openclaw plugins install npm-pack:<tgz>`).
+# Tags also attach the tarballs to a GitHub release. Upstream workflows only
 # react to main, which this fork never changes.
 name: xw build
 
@@ -108,3 +109,66 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
               --notes "XW-Labs build of $GITHUB_REF_NAME ($(git rev-parse HEAD))." --prerelease
           gh release upload "$GITHUB_REF_NAME" .artifacts/xw/* --clobber
+
+  feishu-plugin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.0"
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm --version
+          pnpm install --frozen-lockfile
+
+      - name: Format check (feishu)
+        run: pnpm exec oxfmt --check extensions/feishu
+
+      - name: Typecheck extensions
+        run: pnpm tsgo:extensions
+
+      - name: Pack feishu plugin
+        id: package
+        run: |
+          set -euo pipefail
+          out=.artifacts/xw-feishu
+          OPENCLAW_PLUGIN_NPM_PACK_OUTPUT_DIR="$out" \
+            bash scripts/plugin-npm-publish.sh --pack extensions/feishu > "$RUNNER_TEMP/pack.json"
+          packed=$(ls "$out"/*.tgz)
+          [ "$(echo "$packed" | wc -l)" -eq 1 ] || { echo "expected one tarball: $packed" >&2; exit 1; }
+          version=$(node -p 'require("./extensions/feishu/package.json").version')
+          sha=$(git rev-parse --short=12 HEAD)
+          name="openclaw-feishu-${version}-xw-${sha}.tgz"
+          mv "$packed" "$out/$name"
+          tar -xOf "$out/$name" package/package.json \
+            | node -e 'const p = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(p.name, p.version)'
+          echo "entries: $(tar -tzf "$out/$name" | wc -l)"
+          (cd "$out" && sha256sum "$name" > "$name.sha256")
+          cat "$out/$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: .artifacts/xw-feishu/
+          compression-level: 0
+          retention-days: 30
+
+      - name: Attach to release
+        if: ${{ startsWith(github.ref, 'refs/tags/xw-v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --notes "XW-Labs build of $GITHUB_REF_NAME ($(git rev-parse HEAD))." --prerelease
+          gh release upload "$GITHUB_REF_NAME" .artifacts/xw-feishu/* --clobber

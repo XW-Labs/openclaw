@@ -29,26 +29,33 @@ type ResolvedFeishuGroupSession = {
   threadReply: boolean;
 };
 
-export function resolveFeishuGroupSession(params: {
-  chatId: string;
-  senderOpenId: string;
+type FeishuGroupSessionConfig = {
+  groupSessionScope?: GroupSessionScope;
+  topicSessionMode?: "enabled" | "disabled";
+  replyInThread?: "enabled" | "disabled";
+};
+
+type ResolvedFeishuGroupTopic = {
+  groupSessionScope: GroupSessionScope;
+  replyInThread: boolean;
+  threadReply: boolean;
+  /** Topic identity under `group_topic` / `group_topic_sender`; null otherwise. */
+  topicId: string | null;
+};
+
+/**
+ * Which topic a group message belongs to. Shared by session routing and the inbound
+ * sequential queue, so both agree on which messages form one topic.
+ */
+export function resolveFeishuGroupTopic(params: {
   messageId: string;
   rootId?: string;
   threadId?: string;
   chatType?: FeishuChatType;
-  groupConfig?: {
-    groupSessionScope?: GroupSessionScope;
-    topicSessionMode?: "enabled" | "disabled";
-    replyInThread?: "enabled" | "disabled";
-  };
-  feishuCfg?: {
-    groupSessionScope?: GroupSessionScope;
-    topicSessionMode?: "enabled" | "disabled";
-    replyInThread?: "enabled" | "disabled";
-  };
-}): ResolvedFeishuGroupSession {
-  const { chatId, senderOpenId, messageId, rootId, threadId, chatType, groupConfig, feishuCfg } =
-    params;
+  groupConfig?: FeishuGroupSessionConfig;
+  feishuCfg?: FeishuGroupSessionConfig;
+}): ResolvedFeishuGroupTopic {
+  const { messageId, rootId, threadId, chatType, groupConfig, feishuCfg } = params;
   const normalizedThreadId = threadId?.trim();
   const normalizedRootId = rootId?.trim();
   const threadReply = Boolean(normalizedThreadId || normalizedRootId);
@@ -58,13 +65,33 @@ export function resolveFeishuGroupSession(params: {
   const groupSessionScope = resolveConfiguredFeishuGroupSessionScope({ groupConfig, feishuCfg });
   const normalizedTopicGroupThreadId =
     chatType === "topic_group" ? (normalizedThreadId ?? normalizedRootId) : undefined;
-  const topicScope =
+  const topicId =
     groupSessionScope === "group_topic" || groupSessionScope === "group_topic_sender"
       ? (normalizedTopicGroupThreadId ??
         normalizedRootId ??
         normalizedThreadId ??
         (replyInThread ? messageId : null))
       : null;
+  return { groupSessionScope, replyInThread, threadReply, topicId };
+}
+
+export function resolveFeishuGroupSession(params: {
+  chatId: string;
+  senderOpenId: string;
+  messageId: string;
+  rootId?: string;
+  threadId?: string;
+  chatType?: FeishuChatType;
+  groupConfig?: FeishuGroupSessionConfig;
+  feishuCfg?: FeishuGroupSessionConfig;
+}): ResolvedFeishuGroupSession {
+  const { chatId, senderOpenId, ...topicParams } = params;
+  const {
+    groupSessionScope,
+    replyInThread,
+    threadReply,
+    topicId: topicScope,
+  } = resolveFeishuGroupTopic(topicParams);
 
   let peerId;
   switch (groupSessionScope) {
