@@ -5,10 +5,14 @@ import * as fsSafe from "@openclaw/fs-safe/advanced";
 import { FsSafeError } from "@openclaw/fs-safe/errors";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import * as boundaryFileRead from "../infra/boundary-file-read.js";
 import { copyPluginSourceFile, pluginSourceStatIdentity } from "./plugin-source-file.js";
 
 vi.mock("@openclaw/fs-safe/advanced", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@openclaw/fs-safe/advanced")>()),
+}));
+vi.mock("../infra/boundary-file-read.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../infra/boundary-file-read.js")>()),
 }));
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
@@ -88,6 +92,33 @@ it.each(["grow", "shrink"])("refuses source %s during the bounded transfer", (ch
         fs.appendFileSync(subject.source, "more");
       } else {
         fs.truncateSync(subject.source, 1);
+      }
+    }
+    return Reflect.apply(write, fs, args);
+  });
+  expect(subject.copy).toThrow("Plugin source changed");
+  expect(changed).toBe(true);
+});
+
+it("checks the pinned source descriptor without reopening its root", () => {
+  const subject = fixture();
+  const open = vi.spyOn(boundaryFileRead, "openRootFileSync");
+  subject.copy();
+  expect(open).toHaveBeenCalledOnce();
+});
+
+it.each(["replace", "symlink"])("refuses a source %s during the bounded transfer", (change) => {
+  const subject = fixture();
+  const write = fs.writeSync;
+  let changed = false;
+  vi.spyOn(fs, "writeSync").mockImplementation((...args) => {
+    if (!changed) {
+      changed = true;
+      fs.renameSync(subject.source, `${subject.source}.original`);
+      if (change === "replace") {
+        fs.writeFileSync(subject.source, "replacement");
+      } else {
+        fs.symlinkSync(`${subject.source}.original`, subject.source);
       }
     }
     return Reflect.apply(write, fs, args);

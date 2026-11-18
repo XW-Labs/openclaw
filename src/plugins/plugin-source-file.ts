@@ -80,7 +80,6 @@ function isPluginNativeDescriptor(fd: number): boolean {
 
 function copySmallPluginSourceFile(
   source: string,
-  boundary: string,
   target: string,
   fd: number,
   admitted: fs.BigIntStats,
@@ -95,18 +94,25 @@ function copySmallPluginSourceFile(
       ino: parentIdentity.ino,
       realPath: parent,
     });
-  const assertSource = () =>
-    withPluginSourceFile(source, boundary, (currentFd) => {
-      const current = fs.fstatSync(currentFd, { bigint: true });
-      const before = pluginSourceStatIdentity(admitted);
-      const after = pluginSourceStatIdentity(current);
-      if (before !== after && !pluginSourceIdentityChangedOnlyByCtime(before, after)) {
-        throw new FsSafeError(
-          current.size > admitted.size ? "too-large" : "path-mismatch",
-          "Plugin source changed while preparing its reload; retry after the edit finishes.",
-        );
-      }
-    });
+  // The admitted descriptor pins the source inode; its pathname must still name that inode.
+  // Final source verification repeats the guarded open before any capture is admitted.
+  const assertSource = () => {
+    const current = fs.fstatSync(fd, { bigint: true });
+    const named = fs.lstatSync(source, { bigint: true, throwIfNoEntry: false });
+    const before = pluginSourceStatIdentity(admitted);
+    const after = pluginSourceStatIdentity(current);
+    if (
+      !named?.isFile() ||
+      named.dev !== current.dev ||
+      named.ino !== current.ino ||
+      (before !== after && !pluginSourceIdentityChangedOnlyByCtime(before, after))
+    ) {
+      throw new FsSafeError(
+        current.size > admitted.size ? "too-large" : "path-mismatch",
+        "Plugin source changed while preparing its reload; retry after the edit finishes.",
+      );
+    }
+  };
   const assertAdmission = () => {
     assertParent();
     assertSource();
@@ -171,7 +177,6 @@ export function copyPluginSourceFile(
       ) {
         return copySmallPluginSourceFile(
           source,
-          boundary,
           target,
           fd,
           admitted,
