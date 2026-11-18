@@ -216,6 +216,17 @@ export function bindPluginInstanceModuleLoader(params: PluginInstanceModuleLoade
         retained ? retainedNativeEsmExecution(retained) : (run) => params.instance.run(run),
         moduleSource,
         params.nativeRecovery,
+        undefined,
+        {
+          // Stable captures serve one main-thread package capture; recovery, standalone
+          // entries and retained worker ESM keep their own per-instance custody.
+          reuse:
+            isMainThread &&
+            !retained &&
+            !params.standalone &&
+            !params.nativeRecovery &&
+            !params.recoverySourceMap,
+        },
       );
     if (
       params.expectedSourceDigest !== undefined &&

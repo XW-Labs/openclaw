@@ -27,6 +27,7 @@ import {
 import { createPluginNativeCaptureCustody } from "./plugin-source-capture-native-loads.js";
 import {
   isLegacyPluginSourceCaptureName,
+  PLUGIN_CAPTURE_REUSE_DIRECTORY,
   PLUGIN_SOURCE_CAPTURE_PREFIX,
   resolvePluginSourceCaptureFallbackPrefix,
   resolvePluginSourceCapturesDirectory,
@@ -275,6 +276,8 @@ async function reclaimInstances(
   for (const entry of entries) {
     if (
       !entry.isDirectory() ||
+      // Stable captures keep custody in their own leases; startup maintenance reclaims them.
+      (!legacy && !fallbackPrefix && entry.name === PLUGIN_CAPTURE_REUSE_DIRECTORY) ||
       (legacy && !isLegacyPluginSourceCaptureName(entry.name)) ||
       (fallbackPrefix && !entry.name.startsWith(fallbackPrefix))
     ) {
@@ -356,12 +359,12 @@ export async function prunePluginNativeCaptureDirectories(
   assertCurrent();
   const recordFailure = (error: unknown) => warnings.push(formatErrorMessage(error));
   const maintenance = { retainedPaths, assertCurrent, removed, ...options };
-  await reclaimInstances(
-    path.resolve(resolvePluginSourceCapturesDirectory(stateDir)),
-    recordFailure,
-    false,
-    maintenance,
-  ).catch(recordFailure);
+  const capturesRoot = path.resolve(resolvePluginSourceCapturesDirectory(stateDir));
+  await reclaimInstances(capturesRoot, recordFailure, false, maintenance).catch(recordFailure);
+  // Loaded on demand: this light custody owner must not pull in capture and version code.
+  await import("./plugin-source-capture-reuse.js")
+    .then(({ prunePluginCaptureReuse }) => prunePluginCaptureReuse(capturesRoot, recordFailure))
+    .catch(recordFailure);
   await reclaimInstances(
     tmpdir(),
     recordFailure,

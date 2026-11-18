@@ -8,6 +8,8 @@ type PluginReceiptFile = {
   boundary: string;
   sizeBytes: number;
   native: boolean;
+  /** Content proven by an adopted capture's stat identity; its prepared receipt must hit. */
+  adopted?: boolean;
   onContent: (fact: PluginSourceContent) => void;
   content?: PluginSourceContent;
 };
@@ -84,6 +86,12 @@ export function createPluginGenerationReceipt(prepared?: PluginGenerationReceipt
         return finished;
       }
       const signature = inputSignature();
+      if (
+        events.some((event) => typeof event !== "string" && event.adopted) &&
+        (signature === undefined || prepared?.signature !== signature)
+      ) {
+        throw new Error("Plugin capture reuse changed its source receipt");
+      }
       const receipt =
         signature !== undefined && prepared?.signature === signature
           ? undefined
@@ -91,7 +99,7 @@ export function createPluginGenerationReceipt(prepared?: PluginGenerationReceipt
       for (const event of events) {
         if (typeof event === "string") {
           receipt?.update(event);
-        } else if (receipt || !event.content || !event.native) {
+        } else if (receipt || !event.content || !(event.native || event.adopted)) {
           // Copied descriptors supply bytes, not pathname admission. Recheck ordinary
           // destinations even on a receipt hit; misses also replay native raw bytes.
           readContent(event, receipt);
