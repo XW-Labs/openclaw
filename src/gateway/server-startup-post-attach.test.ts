@@ -2453,6 +2453,38 @@ describe("startGatewayPostAttachRuntime", () => {
     }
   });
 
+  it("defers retention for a ready Control UI root until post-ready work", async () => {
+    const postReadyWork = createDeferred();
+    const startAssets = vi.fn(async () => {});
+    const stopAssets = vi.fn(async () => {});
+    const runtime = await startGatewayPostAttachRuntime(
+      createPostAttachParams({
+        waitForPostReadyWork: () => postReadyWork.promise,
+        controlUiRootLifecycle: {
+          state: { kind: "bundled", path: "/control-ui", realPath: "/control-ui" },
+          setEnabled: vi.fn(),
+          start: startAssets,
+          stop: stopAssets,
+        },
+      }),
+      createPostAttachRuntimeDeps(),
+    );
+    try {
+      await runtime.startupSettled;
+      expect(startAssets).not.toHaveBeenCalled();
+      postReadyWork.resolve();
+      await waitForGatewayTestState(() => {
+        expect(startAssets).toHaveBeenCalledOnce();
+      });
+    } finally {
+      postReadyWork.resolve();
+      await runtime.startupSettled;
+      await runtime.stopGatewayUpdateCheck();
+      await stopTrackedSidecars(publishedGatewayLifetimeSidecars);
+    }
+    expect(stopAssets).toHaveBeenCalledOnce();
+  });
+
   it("rechecks a queued Control UI producer after suspension admission resumes", async () => {
     vi.useFakeTimers();
     const suspension = tryBeginGatewaySuspendAdmission(() => {});

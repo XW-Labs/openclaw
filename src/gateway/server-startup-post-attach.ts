@@ -655,12 +655,19 @@ export async function startGatewayPostAttachRuntime(
   const candidateCanary = params.updateCanary === true;
   const controlUiRootLifecycle = params.controlUiRootLifecycle;
   const mainSessionRecoveryStartupCheckedStorePaths = new Set<string>();
+  // A ready root already serves the current build, so its remaining work (re-verifying and
+  // retaining earlier generations for open documents) waits for the post-ready window instead
+  // of competing with plugin loading. Roots that still need a build start immediately.
+  const controlUiRootReady =
+    controlUiRootLifecycle?.state.kind === "bundled" ||
+    controlUiRootLifecycle?.state.kind === "resolved";
   const controlUiAssetsSidecar =
     !params.minimalTestGateway && controlUiRootLifecycle
       ? schedulePostReadySidecarTask({
           name: "sidecars.control-ui-assets",
           startupTrace: params.startupTrace,
           log: params.log,
+          ...(controlUiRootReady ? { waitForPostReadyWork: params.waitForPostReadyWork } : {}),
           shouldRun: () => params.isClosing?.() !== true,
           run: controlUiRootLifecycle.start,
           stop: controlUiRootLifecycle.stop,
