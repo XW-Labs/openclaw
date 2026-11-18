@@ -29,6 +29,17 @@ function webhookCompletionKey(env: NodeJS.ProcessEnv): string {
   return `webhookListeners:${resolveConfigPath(env)}`;
 }
 
+/** The config marker wins; a completion that changed no config bytes lives in machine state. */
+export function readWebhookCompletion(
+  config: Pick<ConfigFileSnapshot["sourceConfig"], "meta">,
+  env: NodeJS.ProcessEnv,
+): true | Record<string, string[][]> | undefined {
+  return (
+    config.meta?.migrations?.webhookListeners ??
+    readConfigMachineState<true | Record<string, string[][]>>(webhookCompletionKey(env), { env })
+  );
+}
+
 /** No config bytes changed, so this completion does not depend on config rollback. */
 export function recordUnwrittenWebhookCompletion(
   snapshot: Pick<ConfigFileSnapshot, "sourceConfig">,
@@ -66,9 +77,7 @@ export function applyHistoricalWebhookPins(
   } = {},
 ): ChannelDoctorConfigMutation {
   const env = context.env ?? process.env;
-  const marker =
-    mutation.config.meta?.migrations?.webhookListeners ??
-    readConfigMachineState<true | Record<string, string[][]>>(webhookCompletionKey(env), { env });
+  const marker = readWebhookCompletion(mutation.config, env);
   if (marker === true || mutation.warnings?.length) {
     return mutation;
   }

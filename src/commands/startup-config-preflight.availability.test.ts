@@ -10,6 +10,8 @@ import {
   setActiveDegradedPlugins,
 } from "../plugins/runtime-degraded-state.js";
 import { seedInstalledPluginIndex } from "../plugins/test-helpers/installed-plugin-index.js";
+import { resolveConfigPath } from "../config/paths.js";
+import { writeConfigMachineState } from "../state/config-machine-state-write.js";
 import { readConfigMachineState } from "../state/config-machine-state.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -126,6 +128,60 @@ exports.legacyConfigRules = [{
             skipPluginValidation: false,
             observe: false,
           });
+          expect(await fs.readFile(marker, "utf8")).toBe("loaded");
+        }
+      });
+    });
+  },
+);
+
+it.each([false, true])(
+  "skips historical webhook Doctor contracts once machine state records completion (recorded: %s)",
+  async (recorded) => {
+    await withDoctorConfigPreflightHome(async (home) => {
+      await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" }, async () => {
+        // A historical webhook channel id, so startup consults its Doctor contract.
+        const pluginId = "feishu";
+        const pluginDir = path.join(home, "plugins", pluginId);
+        const marker = path.join(home, "doctor-loaded");
+        const configPath = path.join(home, ".openclaw", "openclaw.json");
+        await fs.mkdir(pluginDir, { recursive: true });
+        await fs.writeFile(
+          path.join(pluginDir, "openclaw.plugin.json"),
+          JSON.stringify({
+            id: pluginId,
+            doctorContract: { configRepair: true },
+            configSchema: { type: "object", additionalProperties: false },
+          }),
+        );
+        await fs.writeFile(path.join(pluginDir, "index.cjs"), "exports.register = () => {};\n");
+        await fs.writeFile(
+          path.join(pluginDir, "doctor-contract-api.cjs"),
+          `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "loaded");
+exports.legacyConfigRules = [];\n`,
+        );
+        const config = {
+          gateway: { mode: "local" as const, auth: { mode: "none" as const } },
+          plugins: {
+            allow: [pluginId],
+            load: { paths: [pluginDir] },
+            entries: { [pluginId]: { enabled: true } },
+          },
+        };
+        const configBytes = `${JSON.stringify(config)}\n`;
+        await fs.writeFile(configPath, configBytes);
+        await seedInstalledPluginIndex({}, { config });
+        if (recorded) {
+          writeConfigMachineState(`webhookListeners:${resolveConfigPath()}`, true);
+        }
+
+        const ready = await runStartupConfigPreflight({ gateway: true, observe: false });
+
+        expect(ready.snapshot.valid).toBe(true);
+        expect(await fs.readFile(configPath, "utf8")).toBe(configBytes);
+        if (recorded) {
+          await expect(fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
+        } else {
           expect(await fs.readFile(marker, "utf8")).toBe("loaded");
         }
       });
