@@ -160,6 +160,28 @@ describe("safe npm install helpers", () => {
         npm_config_save: "true",
       },
     },
+    {
+      label: "keeps an operator prefer-offline policy for managed plugin installs",
+      create: () =>
+        createSafeNpmInstallEnv(
+          {
+            PATH: "/usr/bin:/bin",
+            NPM_CONFIG_PREFER_OFFLINE: "true",
+            npm_config_prefer_offline: "true",
+          },
+          {
+            legacyPeerDeps: true,
+            packageLock: true,
+            quiet: true,
+          },
+        ),
+      expected: {
+        NPM_CONFIG_PREFER_OFFLINE: "true",
+        npm_config_prefer_offline: "true",
+        npm_config_package_lock: "true",
+        npm_config_ignore_scripts: "true",
+      },
+    },
   ])("$label", ({ create, expected }) => {
     const env = create();
     for (const [key, value] of Object.entries(expected)) {

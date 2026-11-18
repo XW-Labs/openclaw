@@ -216,6 +216,45 @@ describe("persistPluginInstall enablement", () => {
     expect(next).toEqual(enabledConfig);
   });
 
+  it("does not load a channel plugin runtime to discover an absent slot kind", async () => {
+    const { persistPluginInstall } = await import("./install-persistence.js");
+    const baseConfig = {
+      plugins: {
+        entries: {},
+      },
+    } as OpenClawConfig;
+    const enabledConfig = {
+      plugins: {
+        entries: {
+          "chat-channel": { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+    enablePluginInConfigMock.mockReturnValue({ config: enabledConfig, enabled: true });
+    loadPluginManifestRegistryMock.mockReturnValue({
+      plugins: [createManifestRecord("chat-channel", { channels: ["chat-channel"] })],
+      diagnostics: [],
+    });
+    applyExclusiveSlotSelectionMock.mockReturnValue(enabledConfig);
+
+    const next = await persistPluginInstall({
+      snapshot: installSnapshot(baseConfig),
+      pluginId: "chat-channel",
+      install: {
+        source: "npm",
+        spec: "chat-channel@1.0.0",
+        installPath: "/tmp/chat-channel",
+      },
+    });
+
+    expect(buildPluginDiagnosticsReportMock).not.toHaveBeenCalled();
+    expect(applyExclusiveSlotSelectionMock).toHaveBeenCalledTimes(1);
+    expect(
+      requireMockCallArg(applyExclusiveSlotSelectionMock, "applyExclusiveSlotSelectionMock"),
+    ).toMatchObject({ config: enabledConfig, selectedId: "chat-channel", selectedKind: undefined });
+    expect(next).toEqual(enabledConfig);
+  });
+
   it("installs a plugin disabled when its required configuration is missing", async () => {
     const { persistPluginInstall } = await import("./install-persistence.js");
     const baseConfig = {

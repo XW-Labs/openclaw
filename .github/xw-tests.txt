@@ -23,3 +23,6 @@ src/plugins/plugin-module-generation.update.test.ts
 src/plugins/plugin-module-generation.native-layout.test.ts
 src/plugins/plugin-instance-module-loader.failed-acquisition.test.ts
 src/commands/startup-plugin-source-captures.test.ts
+src/plugins/install-persistence.enablement.test.ts
+src/infra/safe-package-install.test.ts
+src/infra/npm-install-env.test.ts
