@@ -311,11 +311,13 @@ const recordsNative = (artifact: Artifact) =>
   );
 
 it.skipIf(process.platform === "win32")(
-  "adopts the ordinary files around native artifacts and admits the native bytes again",
+  "recaptures around native artifacts whose admission no installed index carries",
   async () => {
     const source = createSource();
-    // Like Feishu's fs-safe binaries: the addon lives in a dependency package, so native
-    // admission takes that package and the plugin's own files stay in the reused tree.
+    // The addon lives in a dependency package, as Feishu ships it. Without an installed index
+    // carrying its admission there is no prepared receipt to prove adopted bytes against, so
+    // the next start fails closed: same slot, fresh files, same digest. The managed case below
+    // adopts.
     const dep = fs.realpathSync(path.join(source, "node_modules", "dep"));
     fs.writeFileSync(path.join(dep, "addon.node"), "native fixture");
     const addon = (artifact: Artifact) => path.join(artifact.sourceAliases[dep]!, "addon.node");
@@ -330,16 +332,14 @@ it.skipIf(process.platform === "win32")(
       const indexIno = index(first).ino;
       const digest = first.sourceDigest;
       restart(first);
-      const work = countWork();
       // A later process has its own native admission state and admits the addon again.
       const second = withPluginCache(caches[1]!, () => capture(source));
       expect(second.boundaryRoot).toBe(first.boundaryRoot);
       expect(second.sourceDigest).toBe(digest);
-      expect(index(second).ino).toBe(indexIno);
-      const contentCopies = work.copies.mock.calls.filter(([, , target]) =>
-        String(target).startsWith(second.boundaryRoot + path.sep),
+      expect(index(second).ino).not.toBe(indexIno);
+      expect(fs.readFileSync(second.resolve(path.join(source, "index.cjs")), "utf8")).toBe(
+        "module.exports = require('./lib/util.cjs');",
       );
-      expect(contentCopies).toEqual([]);
       expect(fs.readFileSync(addon(second), "utf8")).toBe("native fixture");
       expect(recordsNative(second)).toBe(false);
       restart(second);
