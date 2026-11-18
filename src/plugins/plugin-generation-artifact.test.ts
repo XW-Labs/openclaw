@@ -47,6 +47,29 @@ it.each(["empty", "nested/empty", ".git/empty", "node_modules/unused"])(
   },
 );
 
+it("skips type declarations and source maps when capturing a package body", () => {
+  const source = temp.make("plugin-inert-files-");
+  fs.writeFileSync(path.join(source, "index.cjs"), "exports.value = 1;");
+  fs.writeFileSync(path.join(source, "index.d.ts"), "export declare const value: number;");
+  fs.writeFileSync(path.join(source, "index.d.mts"), "export declare const value: number;");
+  fs.writeFileSync(path.join(source, "index.cjs.map"), "{}");
+  // A directory whose name looks inert is still captured.
+  fs.mkdirSync(path.join(source, "lodash.map"));
+  fs.writeFileSync(path.join(source, "lodash.map", "index.cjs"), "exports.value = 2;");
+  const artifact = capturePluginGenerationArtifact(source);
+  cleanups.push(artifact.dispose);
+  const captured = (name: string) => fs.existsSync(path.join(artifact.rootDir, name));
+  expect(captured("index.cjs")).toBe(true);
+  expect(captured("index.d.ts")).toBe(false);
+  expect(captured("index.d.mts")).toBe(false);
+  expect(captured("index.cjs.map")).toBe(false);
+  expect(captured(path.join("lodash.map", "index.cjs"))).toBe(true);
+  expect(artifact.assertSourceCurrent).not.toThrow();
+  // Directory membership still covers skipped names.
+  fs.writeFileSync(path.join(source, "extra.d.ts"), "export {};");
+  expect(artifact.assertSourceCurrent).toThrow();
+});
+
 it("keeps the plugin source identity independent of Git rollback retirement", () => {
   const source = temp.make("plugin-update-digest-");
   fs.writeFileSync(path.join(source, "index.cjs"), "exports.value = 1;");

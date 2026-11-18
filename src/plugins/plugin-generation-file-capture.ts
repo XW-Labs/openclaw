@@ -30,6 +30,18 @@ export function createPluginSourceLinkCapture() {
   };
 }
 
+// Type declarations and source maps are never executed. Package walks skip them so large
+// dependency trees capture only runtime files; the directory hash still covers every name,
+// and exports/imports targets that name one are captured individually by their package owner.
+const RUNTIME_INERT_PACKAGE_FILE = /\.(?:d\.[cm]?ts|map)$/u;
+
+export function isRuntimeInertPackageFile(name: string, filename: string): boolean {
+  return (
+    RUNTIME_INERT_PACKAGE_FILE.test(name) &&
+    fs.lstatSync(filename, { throwIfNoEntry: false })?.isFile() === true
+  );
+}
+
 /** Capture each selected package file once, retaining its source facts and ordered receipt. */
 export function createPluginGenerationFileCapture({
   boundary,
@@ -126,6 +138,7 @@ export function createPluginGenerationFileCapture({
       recordContent(contentHash);
       for (const name of names) {
         if (
+          !isRuntimeInertPackageFile(name, path.join(real, name)) &&
           !(
             deferExternalLinks &&
             !nativeAdmission.isRetainedReference(path.join(source, name)) &&
