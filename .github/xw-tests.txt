@@ -49,3 +49,4 @@ src/plugins/native-module-require.test.ts
 src/plugins/plugin-native-admission-source-index.test.ts
 src/plugins/plugin-registry-snapshot.receipts.test.ts
 src/plugins/installed-plugin-index-store-write.receipt.test.ts
+src/gateway/server-kernel.test.ts

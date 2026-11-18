@@ -249,7 +249,9 @@ async function createGatewayKernelWithSdkHost(
     if (!options.deferEarlyRuntime) {
       await coreRuntime.startEarlyRuntime();
     }
-    await pluginMetadata.waitForRetirement();
+    await runtime.startupTrace.measure("plugins.metadata-retirement", () =>
+      pluginMetadata.waitForRetirement(),
+    );
     return await runtime.startupTrace.measure("gateway.request-runtime", () =>
       prepareGatewayKernelRequestRuntime({
         coreRuntime,

@@ -964,10 +964,13 @@ describe("createGatewayKernel", () => {
         "gateway.handlers",
         "runtime.early",
         "runtime.early.discovery",
+        "plugins.metadata-retirement",
         "gateway.request-runtime",
         "gateway.config-revision-key",
         "gateway.request-context",
         "sessions.projection",
+        "sessions.projection-materialize",
+        "sidecars.initial-lifetime",
       ]);
     } finally {
       try {
