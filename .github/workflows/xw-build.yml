@@ -41,6 +41,9 @@ jobs:
           pnpm --version
           pnpm install --frozen-lockfile
 
+      - name: Typecheck core
+        run: pnpm tsgo:core
+
       - name: Targeted tests
         run: |
           set -euo pipefail
