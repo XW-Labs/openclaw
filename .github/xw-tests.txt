@@ -9,3 +9,4 @@ extensions/feishu/src/monitor.message-handler.ingress.test.ts
 extensions/feishu/src/bot.bot-threads.test.ts
 extensions/feishu/src/bot.test.ts
 extensions/feishu/src/session-route.test.ts
+src/plugins/plugin-source-file.copy.test.ts
