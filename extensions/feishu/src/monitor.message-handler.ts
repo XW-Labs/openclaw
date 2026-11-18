@@ -1,6 +1,7 @@
 import { createRuntimeConfigReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { isRecord, readStringValue as readString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ClawdbotConfig, HistoryEntry, PluginRuntime, RuntimeEnv } from "../runtime-api.js";
+import { mergeFeishuAccountConfig } from "./accounts.js";
 import type { handleFeishuMessage } from "./bot.js";
 import {
   claimUnprocessedFeishuMessage,
@@ -190,6 +191,7 @@ export function createFeishuMessageReceiveHandler({
       event,
       preparedContent,
       botOpenId: getBotOpenId(accountId),
+      feishuCfg: mergeFeishuAccountConfig(readConfig(), accountId),
     });
     const task = async () => {
       if (turnAdoptionLifecycle?.abortSignal.aborted) {
