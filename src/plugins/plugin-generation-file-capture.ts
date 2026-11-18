@@ -4,6 +4,7 @@ import { isPathInside } from "../infra/path-guards.js";
 import type { createPluginGenerationReceipt } from "./plugin-generation-receipt.js";
 import type { createPluginNativeAdmission } from "./plugin-native-admission.js";
 import type { createPluginSourceCapture } from "./plugin-package-metadata-capture.js";
+import type { PluginCaptureAdoption } from "./plugin-source-capture-reuse.js";
 import {
   copyPluginSourceFile,
   pluginSourceIdentityChangedOnlyByCtime,
@@ -57,6 +58,8 @@ export function createPluginGenerationFileCapture({
   nativeAdmission,
   receipt,
   onPackageMetadata,
+  adoption,
+  contentHashes,
 }: {
   boundary: string;
   destination: string;
@@ -74,6 +77,10 @@ export function createPluginGenerationFileCapture({
   nativeAdmission: ReturnType<typeof createPluginNativeAdmission>;
   receipt: ReturnType<typeof createPluginGenerationReceipt>;
   onPackageMetadata: (source: string, target: string) => void;
+  /** While active, the previous capture's bytes stand in for copies whose source is unchanged. */
+  adoption?: PluginCaptureAdoption;
+  /** Verified content of each copied destination, for a reusable capture's manifest. */
+  contentHashes?: Map<string, string>;
 }) {
   const { inputs, pendingInputs, additions } = sourceCapture;
   const ancestors = new Set<string>();
@@ -133,8 +140,14 @@ export function createPluginGenerationFileCapture({
         throw new Error(`Plugin source contains a directory cycle: ${source}`);
       }
       ancestors.add(real);
-      fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+      const adopting = adoption?.active;
+      if (!adopting) {
+        fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+      }
       const { names, contentHash } = readPluginSourceDirectory(real);
+      if (adopting) {
+        adoption!.directory(real, pluginSourceInputIdentity(stat), contentHash, target);
+      }
       recordContent(contentHash);
       for (const name of names) {
         if (
@@ -153,13 +166,25 @@ export function createPluginGenerationFileCapture({
       if (stat.nlink > 1n) {
         hardlinkedSources.add(target);
       }
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      const adopting = adoption?.active;
+      if (!adopting) {
+        fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      }
       // Register before copying or admission can fail: known aliases must remain
       // rejected by the acquisition owner even when the first attempt is incomplete.
       additions.add(target);
       let copiedContent: ReturnType<typeof copyPluginSourceFile>;
-      const native = nativeAdmission.materialize(real, inputBoundary, target, stat, source);
-      if (native) {
+      const native = adopting
+        ? undefined
+        : nativeAdmission.materialize(real, inputBoundary, target, stat, source);
+      if (adopting) {
+        // Native admission owns separate custody; reusable captures never hold native bytes.
+        if (nativeAdmission.isNativeInput(real, inputBoundary, stat, source)) {
+          adoption!.miss(`native input ${source}`);
+        }
+        const identity = pluginSourceInputIdentity(stat);
+        copiedContent = { ...adoption!.file(real, identity, target), sourceIdentity: identity };
+      } else if (native) {
         nativeAdmission.reconcileSourceInputs(inputs);
       } else if (captured) {
         // A second filename for a prefetched entry retains its first bytes and source identity.
@@ -187,9 +212,13 @@ export function createPluginGenerationFileCapture({
         boundary: native?.boundary ?? directory,
         sizeBytes: Number(stat.size),
         native: native !== undefined,
+        adopted: adopting,
         prepared: native?.content ?? copiedContent,
         onContent: (content) => {
           native?.record(content);
+          if (!native) {
+            contentHashes?.set(target, content.contentHash);
+          }
           recordContent(
             content.contentHash,
             content.sizeBytes,

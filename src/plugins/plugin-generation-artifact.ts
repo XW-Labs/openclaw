@@ -16,6 +16,7 @@ import {
 } from "./plugin-generation-source-lookup.js";
 import {
   createPluginNativeAdmission,
+  hasPreparedPluginNativeAdmission,
   type PluginNativeRecovery,
 } from "./plugin-native-admission.js";
 import { createPluginNativeImportPattern } from "./plugin-native-resolution.js";
@@ -30,12 +31,19 @@ import {
   importTargetNames,
   createPluginPackageMetadataCapture,
   createPluginSourceCapture,
+  hasPluginSourceCaptureDirectoryOverride,
   type PluginDependencyResolution,
   type PluginPackageCapture,
   type PluginModuleCapture,
   isPluginPackageFile as inPackage,
   findPluginCapturedPackage,
 } from "./plugin-package-metadata-capture.js";
+import {
+  acquirePluginCaptureReuse,
+  isPluginCaptureReuseEnabled,
+  type PluginCaptureAdoption,
+  type PluginCaptureReuse,
+} from "./plugin-source-capture-reuse.js";
 import { isPluginSourceEntry } from "./plugin-source-file.js";
 import {
   capturedPluginModuleUrl,
@@ -45,7 +53,18 @@ import {
 } from "./plugin-source-references.js";
 import { verifyPluginSourceInputs } from "./plugin-source-verification.js";
 
-/** Capture selective entries and whole dependencies without replacing earlier file bytes. */
+type PluginCaptureReuseAttempt = {
+  lease: PluginCaptureReuse;
+  adoption?: PluginCaptureAdoption;
+  release: () => void;
+};
+
+/**
+ * Capture selective entries and whole dependencies without replacing earlier file bytes.
+ * With `reuse`, an eligible external package capture keeps a stable leased directory across
+ * processes (OPENCLAW_PLUGIN_CAPTURE_REUSE=1): unchanged sources adopt the previous bytes by
+ * exact stat identity, and any difference recaptures exactly as a fresh directory would.
+ */
 export function capturePluginGenerationArtifact(
   rootDir: string,
   entryFile?: string,
@@ -53,8 +72,77 @@ export function capturePluginGenerationArtifact(
   moduleSource?: (filename: string) => string,
   nativeRecovery?: PluginNativeRecovery,
   dependencyLookupBoundary?: Parameters<typeof createPluginDependencyResolver>[0],
+  options: { reuse?: boolean } = {},
 ) {
-  const sourceCapture = createPluginSourceCapture(execute);
+  const capture = (reuse?: PluginCaptureReuseAttempt) =>
+    captureArtifact(
+      rootDir,
+      entryFile,
+      execute,
+      moduleSource,
+      nativeRecovery,
+      dependencyLookupBoundary,
+      reuse,
+    );
+  const lease =
+    options.reuse &&
+    isPluginCaptureReuseEnabled() &&
+    !entryFile &&
+    !nativeRecovery &&
+    dependencyLookupBoundary === undefined &&
+    !hasPluginSourceCaptureDirectoryOverride() &&
+    !hasPreparedPluginNativeAdmission(rootDir)
+      ? acquirePluginCaptureReuse({ rootDir, executes: Boolean(execute) })
+      : undefined;
+  if (!lease) {
+    return capture();
+  }
+  // The returned artifact owns the lease; failed attempts leave it to this caller.
+  let owned = false;
+  const release = () => {
+    if (owned) {
+      lease.release();
+    }
+  };
+  try {
+    let artifact: ReturnType<typeof captureArtifact> | undefined;
+    if (lease.adoption) {
+      try {
+        artifact = capture({ lease, adoption: lease.adoption, release });
+      } catch {
+        // Adoption only reads; any miss or error recaptures into a fresh directory.
+      }
+    }
+    if (!artifact) {
+      lease.recycle();
+      artifact = capture({ lease, release });
+    }
+    owned = true;
+    return artifact;
+  } catch (error) {
+    lease.release();
+    throw error;
+  }
+}
+
+function captureArtifact(
+  rootDir: string,
+  entryFile: string | undefined,
+  execute: (<T>(run: () => T) => T) | undefined,
+  moduleSource: ((filename: string) => string) | undefined,
+  nativeRecovery: PluginNativeRecovery | undefined,
+  dependencyLookupBoundary: Parameters<typeof createPluginDependencyResolver>[0] | undefined,
+  reuse: PluginCaptureReuseAttempt | undefined,
+) {
+  const adoption = reuse?.adoption;
+  const sourceCapture = createPluginSourceCapture(
+    execute,
+    reuse && {
+      directory: reuse.lease.directory,
+      outputRoot: reuse.lease.outputRoot,
+      release: reuse.release,
+    },
+  );
   const directory = sourceCapture.directory;
   const packages = new Map<string, PluginPackageCapture>();
   const capturedPaths = new Map<string, string>();
@@ -74,7 +162,11 @@ export function capturePluginGenerationArtifact(
     resolveSource: nativeAdmission.resolvePreparedSource,
   });
   const sourceAliases: Record<string, string> = {};
-  const receipt = createPluginGenerationReceipt(nativeAdmission.prepared);
+  const receipt = createPluginGenerationReceipt(
+    nativeAdmission.prepared ?? adoption?.manifest.receipt,
+  );
+  const contentHashes = reuse && !adoption ? new Map<string, string>() : undefined;
+  const adoptedLinks = new Set<string>();
   const {
     inputs,
     pendingInputs,
@@ -179,6 +271,8 @@ export function capturePluginGenerationArtifact(
       deferExternalLinks: Boolean(execute),
       nativeAdmission,
       receipt,
+      adoption,
+      contentHashes,
       onPackageMetadata(source, target) {
         metadataCapture.record(target, (manifest) => {
           for (const alias of importTargetNames(manifest.imports)) {
@@ -208,9 +302,15 @@ export function capturePluginGenerationArtifact(
           : destination;
       const link = path.join(lookupDirectory, "node_modules", name);
       packages.get(dependency.root)!.links.add(link);
-      if (!fs.existsSync(link)) {
+      const linkTarget = path.relative(path.dirname(link), captured);
+      if (adoption?.active) {
+        if (!adoptedLinks.has(link)) {
+          adoption.link(link, linkTarget);
+          adoptedLinks.add(link);
+        }
+      } else if (!fs.existsSync(link)) {
         fs.mkdirSync(path.dirname(link), { recursive: true, mode: 0o700 });
-        fs.symlinkSync(path.relative(path.dirname(link), captured), link, "junction");
+        fs.symlinkSync(linkTarget, link, "junction");
         additions.add(link);
       }
     };
@@ -595,6 +695,8 @@ export function capturePluginGenerationArtifact(
   const packageForFile = (filename: string) =>
     findPluginCapturedPackage(packages, filename, directory)?.owner;
 
+  // Sources changed within the timestamp margin of this instant are rehashed before reuse.
+  const recordedAtNs = BigInt(Date.now()) * 1_000_000n;
   try {
     const sourceRoot = fs.realpathSync(rootDir);
     const entry = entryFile ? fs.realpathSync(entryFile) : undefined;
@@ -607,7 +709,7 @@ export function capturePluginGenerationArtifact(
       );
       capturedPaths.set(alias, capturedPaths.get(entry)!);
     }
-    const assertSourceCurrent = () => {
+    const verifySources = (adopted?: ReadonlySet<string>) => {
       if (
         fs.realpathSync(rootDir) !== sourceRoot ||
         (entryFile && fs.realpathSync(entryFile) !== entry)
@@ -615,11 +717,31 @@ export function capturePluginGenerationArtifact(
         throw new Error("Plugin source root changed after capture");
       }
       nativeAdmission.reconcileSourceInputs(inputs);
-      verifyPluginSourceInputs(inputs, inputs.keys());
+      verifyPluginSourceInputs(inputs, inputs.keys(), adopted);
     };
+    const assertSourceCurrent = () => verifySources();
+    // The receipt rehashes copied destinations after this instant; later edits look racy.
+    const capturedAtNs = BigInt(Date.now()) * 1_000_000n;
     const initialReceipt = receipt.finish();
-    assertSourceCurrent();
+    verifySources(adoption?.adopted);
     nativeAdmission.finish(initialReceipt);
+    if (adoption) {
+      adoption.active = false;
+      reuse!.lease.adopted();
+    } else if (reuse) {
+      try {
+        reuse.lease.commit({
+          recordedAtNs,
+          capturedAtNs,
+          receipt: initialReceipt,
+          sources: inputs,
+          contentHashes: contentHashes!,
+        });
+      } catch (error) {
+        // Without a manifest the next start recaptures; this capture stays valid.
+        process.emitWarning(`Plugin capture reuse manifest skipped: ${String(error)}`);
+      }
+    }
     pendingInputs.clear();
     additions.clear();
     const captures = [moduleCaptures, hardlinkedSources, metadataCapture, packages];
@@ -715,4 +837,4 @@ export function capturePluginGenerationArtifact(
   }
 }
 
-export type PluginGenerationArtifact = ReturnType<typeof capturePluginGenerationArtifact>;
+export type PluginGenerationArtifact = ReturnType<typeof captureArtifact>;

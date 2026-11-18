@@ -633,15 +633,27 @@ export function withPluginSourceCaptureDirectory<T>(
   return sourceCaptureDirectory.run({ directory, managedRoot }, run);
 }
 
+export function hasPluginSourceCaptureDirectoryOverride(): boolean {
+  return sourceCaptureDirectory.getStore() !== undefined;
+}
+
+/** A leased stable directory keeps its bytes after disposal; its owner reclaims them later. */
+type PluginSourceCaptureVariant = { directory: string; outputRoot: string; release: () => void };
+
 /** Admissions and failed-input receipts belong to one source acquisition lifetime. */
-export function createPluginSourceCapture(execute?: <T>(run: () => T) => T) {
-  const override = sourceCaptureDirectory.getStore();
-  const instance = override === undefined ? retainPluginSourceCaptureInstance() : undefined;
+export function createPluginSourceCapture(
+  execute?: <T>(run: () => T) => T,
+  variant?: PluginSourceCaptureVariant,
+) {
+  const override = variant ? undefined : sourceCaptureDirectory.getStore();
+  const instance =
+    override === undefined && !variant ? retainPluginSourceCaptureInstance() : undefined;
   let created: string | undefined;
   let directory: string;
   try {
-    created =
-      override !== undefined
+    created = variant
+      ? variant.directory
+      : override !== undefined
         ? fs.mkdtempSync(path.join(override.directory, PLUGIN_SOURCE_CAPTURE_PREFIX))
         : instance!.createDirectory();
     directory = fs.realpathSync(created);
@@ -649,7 +661,7 @@ export function createPluginSourceCapture(execute?: <T>(run: () => T) => T) {
   } catch (error) {
     const cleanupErrors: unknown[] = [];
     try {
-      if (created) {
+      if (created && !variant) {
         fs.rmSync(created, { recursive: true, force: true });
       }
     } catch (cleanupError) {
@@ -722,7 +734,7 @@ export function createPluginSourceCapture(execute?: <T>(run: () => T) => T) {
     capture: captureAdmitted,
     assertModuleAvailable,
     directory,
-    outputRoot: override?.managedRoot ?? instance?.managedRoot,
+    outputRoot: variant?.outputRoot ?? override?.managedRoot ?? instance?.managedRoot,
     linkHost: (hostRoot: string) => {
       const modules = path.join(directory, "node_modules");
       fs.mkdirSync(modules, { recursive: true, mode: 0o700 });
@@ -731,6 +743,10 @@ export function createPluginSourceCapture(execute?: <T>(run: () => T) => T) {
     },
     dispose() {
       beginDisposal();
+      if (variant) {
+        variant.release();
+        return;
+      }
       if (!retainLoadedPluginSourceCapture(directory)) {
         fs.rmSync(directory, { recursive: true, force: true });
       }
@@ -738,6 +754,10 @@ export function createPluginSourceCapture(execute?: <T>(run: () => T) => T) {
     },
     async disposeAsync() {
       beginDisposal();
+      if (variant) {
+        variant.release();
+        return;
+      }
       if (!retainLoadedPluginSourceCapture(directory)) {
         await fsPromises.rm(directory, { recursive: true, force: true });
       }

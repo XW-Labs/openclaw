@@ -157,6 +157,13 @@ function isNativeArtifact(
   );
 }
 
+/** A published native receipt binds this plugin's capture to native admission custody. */
+export function hasPreparedPluginNativeAdmission(rootDir: string, entryFile?: string): boolean {
+  return nativeAdmissionStateFor().receipts.has(
+    `${path.resolve(rootDir)}\0${entryFile ? path.resolve(entryFile) : ""}`,
+  );
+}
+
 /** Admission is shared below registration; each generation still owns its module graph. */
 export function createPluginNativeAdmission(
   rootDir: string,
@@ -528,6 +535,22 @@ export function createPluginNativeAdmission(
       }
       recoveredFiles.set(canonical, admitted);
       return true;
+    },
+    /** Whether materialize would admit this file as native bytes, without admitting it. */
+    isNativeInput(
+      source: string,
+      boundary: string,
+      stat: fs.BigIntStats,
+      logicalSource = sourceForPrepared(source) ?? source,
+    ): boolean {
+      const known =
+        files.get(logicalSource) ?? state.files.get(logicalSource) ?? recoveredFiles.get(source);
+      return (
+        owner?.source !== logicalSource &&
+        owner?.setupSource !== logicalSource &&
+        entryFile !== logicalSource &&
+        isNativeArtifact(source, boundary, stat, Boolean(known))
+      );
     },
     materialize(
       source: string,

@@ -38,9 +38,11 @@ export type PluginSourceInput = {
   native?: boolean;
 };
 
+/** `adopted` sources keep content hashes that their unchanged stat identity already proves. */
 export function verifyPluginSourceInputs(
   inputs: ReadonlyMap<string, PluginSourceInput>,
   sources: Iterable<string>,
+  adopted?: ReadonlySet<string>,
 ): void {
   for (const source of sources) {
     const input = inputs.get(source)!;
@@ -61,7 +63,7 @@ export function verifyPluginSourceInputs(
       identity !== input.identity ||
       (input.directory
         ? readPluginSourceDirectory(source).contentHash
-        : input.native
+        : input.native || (adopted?.has(source) && identity === input.identity)
           ? input.contentHash
           : hashPluginSourceFile(source, input.boundary).contentHash) !== input.contentHash
     ) {

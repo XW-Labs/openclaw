@@ -5,6 +5,9 @@ import { sha256HexPrefixCore } from "../infra/crypto-digest.js";
 // Captures must remain recognizable to the native source loader in every scratch location.
 export const PLUGIN_SOURCE_CAPTURE_PREFIX = "openclaw-plugin-build-";
 
+// Stable reusable captures live here, beside the per-instance captures the hourly sweeper owns.
+export const PLUGIN_CAPTURE_REUSE_DIRECTORY = "reuse";
+
 export function resolvePluginSourceCapturesDirectory(stateDir: string): string {
   return path.join(stateDir, "tmp", "plugin-captures");
 }

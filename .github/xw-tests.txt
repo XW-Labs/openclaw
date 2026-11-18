@@ -10,3 +10,16 @@ extensions/feishu/src/bot.bot-threads.test.ts
 extensions/feishu/src/bot.test.ts
 extensions/feishu/src/session-route.test.ts
 src/plugins/plugin-source-file.copy.test.ts
+src/plugins/plugin-generation-artifact.reuse.test.ts
+src/plugins/plugin-generation-artifact.admission.test.ts
+src/plugins/plugin-generation-artifact.native-reference.test.ts
+src/plugins/plugin-generation-artifact.ownership.test.ts
+src/plugins/plugin-generation-artifact.storage.test.ts
+src/plugins/plugin-generation-artifact.streaming.test.ts
+src/plugins/plugin-source-capture-directory.test.ts
+src/plugins/plugin-package-metadata-capture.test.ts
+src/plugins/plugin-module-generation.test.ts
+src/plugins/plugin-module-generation.update.test.ts
+src/plugins/plugin-module-generation.native-layout.test.ts
+src/plugins/plugin-instance-module-loader.failed-acquisition.test.ts
+src/commands/startup-plugin-source-captures.test.ts
