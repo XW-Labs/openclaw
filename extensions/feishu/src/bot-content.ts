@@ -86,8 +86,12 @@ export function resolveFeishuGroupSession(params: {
   feishuCfg?: FeishuGroupSessionConfig;
 }): ResolvedFeishuGroupSession {
   const { chatId, senderOpenId, ...topicParams } = params;
-  const { groupSessionScope, replyInThread, threadReply, topicId: topicScope } =
-    resolveFeishuGroupTopic(topicParams);
+  const {
+    groupSessionScope,
+    replyInThread,
+    threadReply,
+    topicId: topicScope,
+  } = resolveFeishuGroupTopic(topicParams);
 
   let peerId;
   switch (groupSessionScope) {

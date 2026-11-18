@@ -5,11 +5,7 @@ import {
 import { resolveFeishuGroupTopic } from "./bot-content.js";
 import { parseFeishuMessageEvent, type FeishuMessageEvent } from "./bot.js";
 import { resolveFeishuGroupConfig } from "./policy.js";
-import {
-  isFeishuGroupChatType,
-  normalizeFeishuEventChatType,
-  type FeishuConfig,
-} from "./types.js";
+import { isFeishuGroupChatType, normalizeFeishuEventChatType, type FeishuConfig } from "./types.js";
 
 export function getFeishuSequentialKey(params: {
   accountId: string;

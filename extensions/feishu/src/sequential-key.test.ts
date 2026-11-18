@@ -198,10 +198,14 @@ describe("getFeishuSequentialKey topic lanes", () => {
   it.each([
     ["group", { groupSessionScope: "group", replyInThread: "enabled" }],
     ["group_sender", { groupSessionScope: "group_sender", replyInThread: "enabled" }],
-    ["no account config", undefined],
   ])("keeps the per-group lane for %s", (_label, cfg) => {
     const event = createGroupEvent({ messageId: "om_1", rootId: "om_a" });
-    expect(keyOf(event, cfg as FeishuConfig | undefined)).toBe("feishu:apm:oc_group");
+    expect(keyOf(event, cfg as FeishuConfig)).toBe("feishu:apm:oc_group");
+  });
+
+  it("keeps the per-group lane without account config", () => {
+    const event = createGroupEvent({ messageId: "om_1", rootId: "om_a" });
+    expect(getFeishuSequentialKey({ accountId: "apm", event })).toBe("feishu:apm:oc_group");
   });
 
   it("keeps the per-chat lane for direct messages", () => {
