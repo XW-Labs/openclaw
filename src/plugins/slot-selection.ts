@@ -24,9 +24,12 @@ export async function applySlotSelectionForPlugin(
   if (!plugin) {
     return config;
   }
-  if (!plugin.kind && !isBundledManifestOwner(plugin)) {
+  if (!plugin.kind && !isBundledManifestOwner(plugin) && plugin.channels.length === 0) {
     // Bundled manifests own slot declarations. Only legacy external plugins need
     // runtime kind inspection; enabling a bundled non-slot plugin must not execute its module.
+    // Slot kinds are memory and context-engine only, so a plugin that declares channels is
+    // not probed: loading a channel runtime just to read an absent kind copies and hashes its
+    // whole dependency tree for nothing.
     const { withPluginDiagnosticsReport } = await import("./status.js");
     // Importing diagnostics yields; recheck the install owner before plugin code executes.
     beforeRuntimeInspection?.();
